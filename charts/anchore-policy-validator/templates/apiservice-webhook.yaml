@@ -1,0 +1,72 @@
+{{ $ca := genCA "svc-cat-ca" 3650 }}
+{{- $svcName := include "anchore-policy-validator.fullname" . }}
+{{- $cn := printf "%s.%s.svc" $svcName .Release.Namespace }}
+{{- $altName1 := printf "%s.cluster.local" $cn }}
+{{- $altName2 := printf "%s" $cn }}
+{{- $server := genSignedCert $cn nil (list $altName1 $altName2) 365 $ca }}
+{{- $major := .Capabilities.KubeVersion.Major -}}
+{{- $minor := .Capabilities.KubeVersion.Minor -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ template "anchore-policy-validator.fullname" . }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ b64enc $server.Cert }}
+  tls.key: {{ b64enc $server.Key }}
+  ca.crt: {{ b64enc $ca.Cert }}
+---
+{{- if and (eq (int $major) 1) (ge (int $minor) 16) }}
+apiVersion: admissionregistration.k8s.io/v1
+{{- else }}
+apiVersion: admissionregistration.k8s.io/v1beta1
+{{- end }}
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ template "anchore-policy-validator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+webhooks:
+- name: pods.{{ template "anchore-policy-validator.name" . }}.admission.banzaicloud.com
+  clientConfig:
+    service:
+      namespace: {{ .Release.Namespace }}
+      name: {{ template "anchore-policy-validator.fullname" . }}
+      path: /imagecheck
+    caBundle: {{ b64enc $ca.Cert }}
+  rules:
+  - apiGroups:   [""]
+    apiVersions: ["v1"]
+    operations:  ["CREATE"]
+    resources:   ["pods"]
+    scope:       "*"
+  admissionReviewVersions: ["v1", "v1beta1"]
+  failurePolicy: {{ .Values.podsFailurePolicy }}
+  sideEffects: None
+  namespaceSelector:
+  {{- if .Values.namespaceSelector.matchLabels }}
+    matchLabels:
+{{ toYaml .Values.namespaceSelector.matchLabels | indent 6 }}
+  {{- end }}
+    matchExpressions:
+  {{- if .Values.namespaceSelector.matchExpressions }}
+{{ toYaml .Values.namespaceSelector.matchExpressions | indent 4 }}
+  {{- end }}
+    - key: name
+      operator: NotIn
+      values:
+      - {{ .Release.Namespace }}
+    - key: scan
+      operator: NotIn
+      values:
+      - noscan
+{{- if and (eq (int $major) 1) (ge (int $minor) 15) }}
+  objectSelector:
+    matchExpressions:
+  {{- if .Values.objectSelector.matchExpressions }}
+{{ toYaml .Values.objectSelector.matchExpressions | indent 4 }}
+  {{- end }}
+    - key: security.banzaicloud.io/validate
+      operator: NotIn
+      values:
+      - skip
+{{- end }}

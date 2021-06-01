@@ -1,0 +1,22 @@
+approved = [
+  "mit",
+  "apache-2.0",
+  "bsd-3-clause",
+  "bsd-2-clause",
+  "mpl-2.0",
+]
+
+ignored = [
+  "sigs.k8s.io/yaml",
+  "github.com/munnerz/goautoneg",
+  "google.golang.org/grpc",
+  "google.golang.org/genproto",
+  "github.com/gogo/protobuf",
+  "github.com/davecgh/go-spew", # ISC license
+  "go.uber.org/atomic",
+  "go.uber.org/multierr",
+  "emperror.dev/errors",
+  "emperror.dev/emperror",
+  "logur.dev/logur",
+  "logur.dev/adapter/logrus",
+]

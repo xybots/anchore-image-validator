@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "anchore-policy-validator.fullname" . }}
+  labels:
+    app: {{ template "anchore-policy-validator.fullname" . }}
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    component: admission-server
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "anchore-policy-validator.name" . }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "anchore-policy-validator.name" . }}
+        release: {{ .Release.Name }}
+        security.banzaicloud.io/validate: skip
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/apiservice-webhook.yaml") . | sha256sum }}
+    spec:
+      {{- if .Values.rbac.enabled }}
+      serviceAccountName: {{ template "anchore-policy-validator.fullname" . }}
+      {{- end }}
+      volumes:
+      - name: serving-cert
+        secret:
+          defaultMode: 420
+          secretName: {{ template "anchore-policy-validator.fullname" . }}
+      - name: tmp
+        emptyDir: {}
+      securityContext:
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+          - "/usr/local/bin/anchore-image-validator"
+          env:
+          - name: ANCHORE_ENGINE_INSECURE
+            value: {{ quote .Values.externalAnchore.insecureSkipVerify }}
+          - name: KUBERNETES_NAMESPACE
+            value: {{ .Release.Namespace }}
+          - name: ANCHORE_APISERVICE_GROUP
+            value: {{ .Values.apiService.group }}
+          - name: ANCHORE_APISERVICE_VERSION
+            value: {{ .Values.apiService.version }}
+          - name: ANCHORE_RELEASE_NAME
+            value: {{ template "anchore-policy-validator.fullname" . }}
+          - name: ANCHORE_ENGINE_USERNAME
+            value: {{ .Values.externalAnchore.anchoreUser }}
+          - name: ANCHORE_ENGINE_PASSWORD
+            value: {{ .Values.externalAnchore.anchorePass }}
+          - name: ANCHORE_ENGINE_URL
+            value: {{ .Values.externalAnchore.anchoreHost }}
+          {{- if .Values.config.app.cacheTTL }}
+          - name: IMAGECHECK_APP_CACHETTL
+            value: {{ .Values.config.app.cacheTTL }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.service.internalPort }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          livenessProbe:
+            httpGet:
+              path: /imagecheck
+              port: {{ .Values.service.internalPort }}
+              scheme: HTTPS
+          volumeMounts:
+          - mountPath: /webhook/certs
+            name: serving-cert
+          - mountPath: /tmp
+            name: tmp
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+    {{- if .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.nodeSelector | indent 8 }}
+    {{- end }}
+  {{- if .Values.tolerations }}
+      tolerations:
+{{ toYaml .Values.tolerations | indent 8 }}
+  {{- end }}
+  {{- if .Values.affinity }}
+      affinity:
+{{ toYaml .Values.affinity | indent 8 }}
+  {{- end }}
